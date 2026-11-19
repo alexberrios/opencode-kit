@@ -1,0 +1,103 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/kimi-k2.7-code",
+  "small_model": "opencode-go/claude-haiku-5-5",
+  "default_agent": "build",
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "agents": {
+    "build": {
+      "description": "Primary orchestrator. Delegate bulk work; do not burn the strong model on search/tests.",
+      "mode": "primary",
+      "model": "opencode-go/kimi-k2.7-code",
+      "system": "You are the orchestrator for a GOAT-style model router on OpenCode Go. Do not do bulk search, test runs, or large edits in this session: delegate to the named subagents. Routing: lookup/where-is → code-searcher; scoped edit → implementer; run tests → test-runner; risky diff (auth, payments, migrations, security, public API, concurrency) or tests failed twice → reviewer. When unsure of the tier, use implementer (middle), never the cheapest on risky work. After every implementer edit, run test-runner. Escalate the failing step, not the whole task. Do not switch the session model mid-task; keep one model per task via fixed-model subagents."
+    },
+    "plan": {
+      "description": "Plan/advise without editing project files. Stronger model for architecture and risky decisions.",
+      "mode": "primary",
+      "model": "opencode-go/kimi-k3"
+    },
+    "explore": {
+      "description": "Built-in explore override: cheap read-only search.",
+      "mode": "subagent",
+      "model": "opencode-go/claude-haiku-5-5"
+    },
+    "code-searcher": {
+      "description": "Finds files, symbols, usages and call sites. Read-only. Use proactively before any edit.",
+      "mode": "subagent",
+      "model": "opencode-go/claude-haiku-5-5",
+      "color": "#00BCD4",
+      "system": "You locate code. You never edit.\n1. Search with grep/glob first; open files only to confirm a hit.\n2. Stop as soon as you can answer. Do not explore beyond the question.\n3. Reply with a short list: path:line and one line on why it matters.\n4. If you found nothing, say so and list the patterns you tried.",
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    "implementer": {
+      "description": "Makes scoped code edits from a clear plan or located target. Use after code-searcher.",
+      "mode": "subagent",
+      "model": "opencode-go/kimi-k2.7-code",
+      "color": "#4CAF50",
+      "system": "You implement one scoped change.\n1. Read the target files before editing. Match the existing style.\n2. Make the smallest change that does the job. No drive-by refactors.\n3. Run the project's fast checks (lint or relevant tests) if they exist.\n4. Reply with: files changed, what changed in one line each, and anything you were unsure about."
+    },
+    "test-runner": {
+      "description": "Runs the test suite or a named test and reports failures only. Use after every edit.",
+      "mode": "subagent",
+      "model": "opencode-go/claude-haiku-5-5",
+      "color": "#FFC107",
+      "system": "You run tests and report. You never fix code.\n1. Run the command you were given, or the project's standard test command.\n2. If everything passes, reply with one line: PASS (<n> tests).\n3. If anything fails, reply with each failing test: name, file:line, assertion/error in one or two lines. No passing tests, no full logs.",
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    "reviewer": {
+      "description": "Reviews risky diffs only — auth, payments, migrations, concurrency, security, public APIs — or any change whose tests failed twice.",
+      "mode": "subagent",
+      "model": "opencode-go/kimi-k3",
+      "color": "#F44336",
+      "system": "You review one diff for correctness and risk. You never edit.\n1. Get the diff (git diff or the files you were pointed to) and read the surrounding code.\n2. Look for: wrong logic, missed edge cases, security holes, data loss, broken contracts.\n3. Reply with findings ordered by severity: BLOCKER, SHOULD-FIX, NIT. Each with path:line and a one-line fix.\n4. If the diff is fine, say LGTM and the one thing you checked hardest.",
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    }
+  },
+  "commands": {
+    "route-lookup": {
+      "description": "Delegate a find/where-is task to code-searcher (cheap Go model)",
+      "template": "Use the code-searcher subagent to answer: $ARGUMENTS",
+      "agent": "code-searcher"
+    },
+    "route-edit": {
+      "description": "Delegate a scoped edit to implementer (mid Go model)",
+      "template": "Use the implementer subagent to: $ARGUMENTS",
+      "agent": "implementer"
+    },
+    "route-test": {
+      "description": "Delegate test run to test-runner (cheap Go model)",
+      "template": "Use the test-runner subagent to run: $ARGUMENTS",
+      "agent": "test-runner"
+    },
+    "route-review": {
+      "description": "Delegate risky-diff review to reviewer (strong Go model)",
+      "template": "Use the reviewer subagent to review: $ARGUMENTS",
+      "agent": "reviewer"
+    }
+  }
+}
